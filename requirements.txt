@@ -1,3 +1,10 @@
+# Integral Calculator & Visualizer Dependencies
+# Core mathematical libraries
 sympy>=1.12
 matplotlib>=3.7.0
 numpy>=1.24.0
+
+# Optional: For enhanced development
+# pytest>=7.0.0  # For running tests
+# black>=22.0.0   # For code formatting
+# flake8>=5.0.0   # For code linting

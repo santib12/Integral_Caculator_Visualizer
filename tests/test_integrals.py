@@ -12,7 +12,7 @@ def test_integral(func_str, expected_result=None, description=""):
     """Test a single integral and display results"""
     print(f"\n{'='*60}")
     print(f"Test: {description}")
-    print(f"Function: ∫ {func_str} dx")
+    print(f"Function: int {func_str} dx")
     
     try:
         # Parse function
@@ -31,15 +31,15 @@ def test_integral(func_str, expected_result=None, description=""):
             # Check if results are equivalent
             diff = simplify(result - sympify(expected_result))
             if diff == 0:
-                print("✓ CORRECT - Matches expected result")
+                print("[OK] CORRECT - Matches expected result")
             else:
-                print(f"⚠ DIFFERENT - Expected: {expected_result}")
+                print(f"[WARN] DIFFERENT - Expected: {expected_result}")
                 print(f"Difference: {diff}")
         else:
-            print("✓ CALCULATED - No expected result provided")
+            print("[OK] CALCULATED - No expected result provided")
             
     except Exception as e:
-        print(f"✗ ERROR: {str(e)}")
+        print(f"[ERROR] ERROR: {str(e)}")
 
 def run_comprehensive_tests():
     """Run comprehensive test suite"""
@@ -111,7 +111,7 @@ def run_comprehensive_tests():
     
     print(f"\n{'='*60}")
     print("TEST SUITE COMPLETED")
-    print("Most functions should show ✓ CORRECT or ✓ CALCULATED")
+    print("Most functions should show [OK] CORRECT or [OK] CALCULATED")
     print("Functions with special notation (erf, Ei, etc.) are mathematically correct")
 
 def test_edge_cases():
@@ -130,10 +130,10 @@ def test_edge_cases():
     
     for func, desc in test_cases:
         print(f"\nEdge Case: {desc}")
-        print(f"Function: ∫ {func} dx")
+        print(f"Function: int {func} dx")
         try:
             if func == "":
-                print("✗ ERROR: Empty function")
+                print("[ERROR] Empty function")
                 continue
                 
             func_str_parsed = func.replace('^', '**')
@@ -144,10 +144,10 @@ def test_edge_cases():
             func = sympify(func_str_parsed)
             result = integrate(func, x)
             print(f"Result: {result} + C")
-            print("✓ HANDLED - Function processed")
+            print("[OK] HANDLED - Function processed")
             
         except Exception as e:
-            print(f"✗ ERROR: {str(e)}")
+            print(f"[ERROR] ERROR: {str(e)}")
 
 if __name__ == "__main__":
     run_comprehensive_tests()

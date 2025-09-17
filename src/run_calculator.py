@@ -36,6 +36,9 @@ def main():
         sys.exit(1)
     
     try:
+        # Add src directory to path for imports
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+        
         from integral_calculator import main as run_calculator
         print("Starting calculator...")
         run_calculator()
