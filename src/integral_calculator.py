@@ -3,6 +3,8 @@ import sympy as sp
 from sympy import symbols, integrate, sympify, simplify, expand, factor, cancel, trigsimp
 from sympy import tanh, cosh, sinh, log, exp, sin, cos
 import re
+from tkinter import font as tkfont
+from sympy import nsimplify, pi, E
 
 class IntegralCalculator:
     def __init__(self, root):
@@ -187,14 +189,16 @@ class IntegralCalculator:
         display_text = self.convert_to_math_notation(func_text)
         
         # Calculate required width based on function length
-        # Base width for integral symbol and bounds
-        base_width = 150
-        # Additional width based on function length (roughly 10 pixels per character)
-        function_width = len(display_text) * 10 + 80  # Extra padding
+        # Base width for integral symbol, bounds, dx, and generous spacing
+        base_width = 300  # More space for integral symbol + bounds + dx + generous spacing
+        # Additional width based on function length (very generous spacing for longer equations)
+        function_width = len(display_text) * 15 + 150  # Increased character width and padding
         # Minimum width
-        min_width = 300
+        min_width = 500  # Increased minimum to accommodate better spacing
+        # Maximum width to prevent excessive expansion but allow for long equations
+        max_width = 1600  # Increased maximum for very long equations
         # Calculate total width
-        total_width = max(min_width, base_width + function_width)
+        total_width = max(min_width, min(max_width, base_width + function_width))
         
         # Resize canvas
         self.display_canvas.config(width=total_width)
@@ -202,7 +206,7 @@ class IntegralCalculator:
         # Recreate grid pattern with new width
         self.create_grid_pattern()
         
-        # Create proper integral symbol (∫) - use large Unicode symbol
+        # Create proper integral symbol (∫) - positioned at fixed left position
         integral_label = tk.Label(self.display_canvas, text="∫", 
                                  font=('Times New Roman', 80, 'bold'), 
                                  bg='white', fg='#333333')
@@ -232,24 +236,25 @@ class IntegralCalculator:
             self.display_canvas.create_rectangle(90, 165, 100, 175, fill='#E0E0E0', 
                                                  outline='#CCCCCC', tags="integral")
         
-        # Function expression - position based on canvas width
-        func_x = min(300, total_width - 150)  # Keep some margin
-        # Display function as regular text (no fancy positioning for input display)
+        # Function expression - positioned well after integral symbol to avoid overlap
+        func_x = 200  # Further increased distance from integral symbol for longer equations
+        # Display function as regular text
         self.display_canvas.create_text(func_x, 100, text=f"({display_text})", 
                                        font=('Arial', 16, 'bold'), fill='#333333', 
                                        tags="integral")
         
-        # dx box - position at the end
+        # dx box - positioned after function with proper spacing
         dx_frame = tk.Frame(self.display_canvas, bg='#F0F0F0', relief='solid', bd=1)
         dx_label = tk.Label(dx_frame, text="dx", font=('Arial', 12, 'bold'), 
                            bg='#F0F0F0', fg='#333333')
         dx_label.pack(padx=5, pady=2)
         
-        # Place dx box at the end of the canvas
-        dx_x = total_width - 50
+        # Calculate dx position based on function width
+        func_width = len(f"({display_text})") * 10 + 20  # Approximate character width
+        dx_x = func_x + func_width + 20  # Add spacing after function
         self.display_canvas.create_window(dx_x, 100, window=dx_frame, tags="integral")
         
-        # Reposition TeX label
+        # Reposition TeX label to stay at right edge
         self.tex_label.place(x=total_width - 50, y=220)
     
     def improved_integrate(self, func, x):
@@ -260,6 +265,17 @@ class IntegralCalculator:
             
             # Apply simplification and canonical forms for better accuracy
             result = self.simplify_and_canonicalize(result, func, x)
+            
+            # Verify antiderivative; try manualintegrate if needed
+            if not self.verify_antiderivative(func, result, x):
+                try:
+                    from sympy.integrals.manualintegrate import manualintegrate
+                    alt = manualintegrate(func, x)
+                    alt = self.simplify_expr(alt)
+                    if self.verify_antiderivative(func, alt, x):
+                        return alt
+                except Exception:
+                    pass
             
             return result
             
@@ -488,6 +504,105 @@ class IntegralCalculator:
         # Return result and +C separately so we can handle positioning
         return result, c_part
     
+    def convert_fractions_to_horizontal(self, text):
+        """Convert stacked fractions back to horizontal format for better space utilization"""
+        import re
+        
+        # Handle stacked fractions (numerator\n—\ndenominator)
+        # Replace with horizontal format: (numerator)/(denominator)
+        stacked_pattern = r'(\w+(?:[²³⁴⁵⁶⁷⁸⁹⁰¹])?)\n—\n(\w+(?:[²³⁴⁵⁶⁷⁸⁹⁰¹])?)'
+        
+        def replace_stacked_fraction(match):
+            numerator = match.group(1)
+            denominator = match.group(2)
+            # Create horizontal fraction
+            horizontal = f"({numerator})/({denominator})"
+            return horizontal
+        
+        # Replace stacked fractions with horizontal format
+        result = re.sub(stacked_pattern, replace_stacked_fraction, text)
+        
+        return result
+
+    def wrap_text_for_canvas(self, text, max_width_px, font_obj):
+        """Wrap a math string to fit within max_width_px using font metrics.
+        Breaks preferentially at spaces and common operators.
+        Returns a list of lines.
+        """
+        if not text:
+            return [""]
+
+        # Insert spaces around typical math operators to create breakpoints
+        # Include common unicode operators used in UI
+        operators_pattern = r"([+\-*/^=(),]|·|×|÷)"
+        preprocessed = re.sub(operators_pattern, r" \1 ", text)
+
+        tokens = preprocessed.split()
+        lines = []
+        current_line_tokens = []
+
+        def measured_width(tokens_list):
+            # Join with single spaces for display spacing
+            return font_obj.measure(" ".join(tokens_list))
+
+        for token in tokens:
+            if not current_line_tokens:
+                current_line_tokens.append(token)
+                continue
+
+            trial = current_line_tokens + [token]
+            if measured_width(trial) <= max_width_px:
+                current_line_tokens.append(token)
+            else:
+                # Commit current line and start new
+                lines.append(" ".join(current_line_tokens))
+                current_line_tokens = [token]
+
+        if current_line_tokens:
+            lines.append(" ".join(current_line_tokens))
+
+        # Fallback: ensure at least one line
+        if not lines:
+            lines = [text]
+
+        return lines
+
+    def simplify_expr(self, expr):
+        """Apply a sequence of simplifications to get a cleaner, equivalent form."""
+        try:
+            simplified = simplify(expr)
+            simplified = cancel(simplified)
+            simplified = factor(simplified)
+            simplified = sp.together(simplified)
+            simplified = sp.radsimp(simplified)
+            simplified = trigsimp(simplified)
+            try:
+                simplified = nsimplify(simplified, [pi, E])
+            except Exception:
+                pass
+            return simplified
+        except Exception:
+            return expr
+
+    def verify_antiderivative(self, func, F, x):
+        """Return True if dF/dx simplifies to func."""
+        try:
+            check = simplify(sp.diff(F, x) - func)
+            return check == 0
+        except Exception:
+            return False
+
+    def parse_bound(self, bound_str):
+        """Parse a bound string into a SymPy expression supporting π and ^ syntax."""
+        s = (bound_str or "").strip()
+        if not s:
+            raise ValueError("Empty bound")
+        s = s.replace('^', '**')
+        s = s.replace('π', 'pi')
+        s = re.sub(r'(\d)([a-zA-Z])', r'\1*\2', s)
+        s = re.sub(r'([a-zA-Z])(\d)', r'\1*\2', s)
+        return sympify(s)
+    
     def create_superscript_text(self, canvas, x, y, base, exponent, font_size=16):
         """Create text with proper superscript positioning"""
         # Create the base text
@@ -574,12 +689,12 @@ class IntegralCalculator:
                     print("Info: Please enter both lower and upper bounds for definite integral")
                     return
                 
+                # Parse bounds as SymPy for exact arithmetic where possible
                 try:
-                    # Parse bounds as numbers
-                    a = float(lower_bound)
-                    b = float(upper_bound)
-                except ValueError:
-                    print("Error: Bounds must be valid numbers")
+                    A = self.parse_bound(lower_bound)
+                    B = self.parse_bound(upper_bound)
+                except Exception:
+                    print("Error: Bounds must be valid numbers or expressions (e.g., 0, 1, pi/2)")
                     return
                 
                 # Parse function
@@ -595,12 +710,42 @@ class IntegralCalculator:
                     self.show_edge_case_result(func_str, result)
                     return
                 
-                # Calculate definite integral
+                # Calculate antiderivative and exact definite integral if possible
                 integral = self.improved_integrate(func, self.x)
-                definite_result = integral.subs(self.x, b) - integral.subs(self.x, a)
-                
-                # Show definite integral result
-                self.show_definite_result_popup(func_str, integral, definite_result, a, b)
+                integral = self.simplify_expr(integral)
+
+                try:
+                    exact_def = integrate(func, (self.x, A, B))
+                except Exception:
+                    exact_def = sp.Integral(func, (self.x, A, B))
+
+                if isinstance(exact_def, sp.Integral):
+                    # Fallback to Fundamental Theorem of Calculus
+                    try:
+                        exact_def = integral.subs(self.x, B) - integral.subs(self.x, A)
+                    except Exception:
+                        exact_def = sp.Integral(func, (self.x, A, B))
+
+                exact_def = self.simplify_expr(exact_def)
+
+                # Numeric approximation
+                try:
+                    numeric_val = float(exact_def.evalf())
+                except Exception:
+                    try:
+                        numeric_val = float((integral.subs(self.x, B) - integral.subs(self.x, A)).evalf())
+                    except Exception:
+                        numeric_val = None
+
+                # Show definite integral result (display exact, include numeric approx)
+                self.show_definite_result_popup(
+                    func_str,
+                    integral,
+                    exact_def,
+                    self.convert_to_math_notation(lower_bound),
+                    self.convert_to_math_notation(upper_bound),
+                    numeric_val,
+                )
                 return
                 
             # Indefinite integral (original logic)
@@ -619,6 +764,7 @@ class IntegralCalculator:
             
             # Use improved integration for normal cases
             integral = self.improved_integrate(func, self.x)
+            integral = self.simplify_expr(integral)
             
             # Show result in popup
             self.show_result_popup(func_str, integral)
@@ -627,31 +773,72 @@ class IntegralCalculator:
             print(f"Error: Calculation error: {str(e)}")
     
     def show_result_popup(self, func_str, integral):
-        """Show result in a popup window with same styling as integral display"""
+        """Show result in a popup window with improved layout for longer equations"""
         # Convert function to proper mathematical notation
         display_func = self.convert_to_math_notation(func_str)
-        # Convert integral result to proper mathematical notation first, then handle fractions
+        # Convert integral result to proper mathematical notation - keep horizontal format
         integral_with_superscripts = self.convert_to_math_notation(str(integral))
-        display_integral, c_part = self.convert_fractions_to_stacked(integral_with_superscripts)
+        display_integral = integral_with_superscripts
+        c_part = " + C"  # Always add +C for indefinite integrals
         
-        # Calculate required width for complete equation (snug on left, expandable on right)
-        # Account for: integral symbol + function + dx + equals + result + C + minimal margin
-        integral_space = 60  # Space for integral symbol (very compact)
-        func_space = len(display_func) * 8 + 30  # Function width (very compact)
-        dx_space = 30  # dx box space (very compact)
-        equals_space = 25  # equals sign (very compact)
-        result_space = len(str(integral)) * 12 + 80  # Result width (more space for expansion)
-        c_space = 50  # + C space (adequate space)
-        safety_margin = 30  # Minimal margin to prevent cutoff
+        # Calculate required width dynamically based on actual equation components
+        # More accurate spacing calculation for even distribution
         
-        total_space = integral_space + func_space + dx_space + equals_space + result_space + c_space + safety_margin
-        min_width = 400  # Very compact minimum for simple equations
-        total_width = max(min_width, total_space)
+        # Calculate actual text widths using font metrics
+        font_size = 16
+        char_width = font_size * 0.6  # Approximate character width for Arial font
+        
+        # Component spacing calculations
+        integral_symbol_width = 80  # Width of the integral symbol
+        integral_bounds_width = 20  # Space for bounds
+        integral_total_width = integral_symbol_width + integral_bounds_width
+        
+        function_text_width = len(display_func) * char_width + 20  # Function text + reduced padding
+        dx_box_width = 30  # dx box width (reduced)
+        equals_width = 15  # equals sign width (reduced)
+        
+        # Calculate result width more accurately for longer equations
+        # Account for stacked fractions and complex expressions
+        result_str = str(integral)
+        if '/' in result_str:
+            # For fractions, estimate width based on longest part
+            parts = result_str.split('/')
+            max_part_width = max(len(part) for part in parts) * char_width
+            result_text_width = max_part_width + 40  # Extra space for fraction formatting
+        else:
+            result_text_width = len(result_str) * char_width + 20  # Standard width
+        
+        c_text_width = len(" + C") * char_width  # + C text width
+        
+        # Spacing between components (tighter for better content hugging)
+        component_spacing = 20  # Reduced from 30 for tighter spacing
+        
+        # Calculate total required width with safety factor for longer equations
+        total_equation_width = (integral_total_width + component_spacing + 
+                               function_text_width + component_spacing + 
+                               dx_box_width + component_spacing + 
+                               equals_width + component_spacing + 
+                               result_text_width + component_spacing + 
+                               c_text_width)
+        
+        # Add safety factor for very long equations to prevent stacking
+        safety_factor = 1.2  # 20% extra space for complex expressions
+        total_equation_width = int(total_equation_width * safety_factor)
+        
+        # Add tighter margins for better content hugging
+        left_margin = 30  # Reduced from 50
+        right_margin = 30  # Reduced from 50
+        total_width = int(total_equation_width + left_margin + right_margin)
+        
+        # Set tighter bounds for better content hugging
+        min_width = 400  # Reduced from 600 for shorter equations
+        max_width = 2500  # Increased to accommodate longer equations with stacked fractions
+        total_width = max(min_width, min(max_width, total_width))
         
         # Create popup window
         result_window = tk.Toplevel(self.root)
         result_window.title("Integral Result")
-        result_window.geometry(f"{total_width}x300")  # Increased height for fractions
+        result_window.geometry(f"{total_width}x350")  # Increased height for better layout
         result_window.configure(bg='#F5F5DC')  # Same cream background
         result_window.resizable(False, False)
         
@@ -661,126 +848,166 @@ class IntegralCalculator:
         
         # Main frame
         main_frame = tk.Frame(result_window, bg='#F5F5DC')
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Title
         title_label = tk.Label(main_frame, text="Result", 
                               font=('Arial', 14, 'bold'), bg='#F5F5DC', fg='#333333')
-        title_label.pack(pady=(0, 10))
+        title_label.pack(pady=(0, 15))
         
         # Display canvas with same styling as main integral display
-        display_canvas = tk.Canvas(main_frame, width=total_width-20, height=180, 
+        display_canvas = tk.Canvas(main_frame, width=total_width-30, height=200, 
                                   bg='white', relief='solid', bd=1,
                                   highlightthickness=2, highlightbackground='#87CEEB')
-        display_canvas.pack(pady=5)
+        display_canvas.pack(pady=10)
         
         # Create grid pattern
-        for i in range(0, total_width-20, 20):
-            display_canvas.create_line(i, 0, i, 180, fill='#F0F0F0', width=1)
-        for i in range(0, 180, 20):
-            display_canvas.create_line(0, i, total_width-20, i, fill='#F0F0F0', width=1)
+        for i in range(0, total_width-30, 20):
+            display_canvas.create_line(i, 0, i, 200, fill='#F0F0F0', width=1)
+        for i in range(0, 200, 20):
+            display_canvas.create_line(0, i, total_width-30, i, fill='#F0F0F0', width=1)
         
-        # Create result display with same styling as integral
-        # Left side: Original integral setup
-        # Integral symbol
+        # Create result display with dynamic positioning for even spacing
+        # Calculate positions based on actual component widths
+        
+        # Start position (left margin)
+        start_x = left_margin
+        
+        # Integral symbol position
+        integral_x = start_x + integral_symbol_width // 2
         integral_label = tk.Label(display_canvas, text="∫", 
                                  font=('Times New Roman', 80, 'bold'), 
                                  bg='white', fg='#333333')
-        display_canvas.create_window(100, 75, window=integral_label)
+        display_canvas.create_window(integral_x, 100, window=integral_label)
         
-        # Function expression - positioned to avoid overlap with integral symbol
-        func_x = 140  # Positioned to avoid overlap (100 + 40)
-        # Use the same approach as main page - create entire function with parentheses as one text
-        # This ensures proper centering like the main page
-        display_canvas.create_text(func_x, 75, text=f"({display_func})", 
+        # Function expression position
+        func_x = start_x + integral_total_width + component_spacing + function_text_width // 2
+        display_canvas.create_text(func_x, 100, text=f"({display_func})", 
                                  font=('Arial', 16, 'bold'), fill='#333333')
         
-        # dx box - positioned with proper spacing from function
+        # dx box position
+        dx_x = start_x + integral_total_width + component_spacing + function_text_width + component_spacing + dx_box_width // 2
         dx_frame = tk.Frame(display_canvas, bg='#F0F0F0', relief='solid', bd=1)
         dx_label = tk.Label(dx_frame, text="dx", font=('Arial', 12, 'bold'), 
                            bg='#F0F0F0', fg='#333333')
         dx_label.pack(padx=5, pady=2)
-        # Calculate dx position based on function width
-        func_width = len(f"({display_func})") * 8 + 15  # Reduced padding for tighter spacing
-        dx_x = func_x + func_width
-        display_canvas.create_window(dx_x, 75, window=dx_frame)
+        display_canvas.create_window(dx_x, 100, window=dx_frame)
         
-        # Equals sign (positioned after dx)
-        equals_x = dx_x + 30  # Reduced spacing
-        display_canvas.create_text(equals_x, 75, text="=", 
+        # Equals sign position
+        equals_x = start_x + integral_total_width + component_spacing + function_text_width + component_spacing + dx_box_width + component_spacing + equals_width // 2
+        display_canvas.create_text(equals_x, 100, text="=", 
                                  font=('Arial', 20, 'bold'), fill='#333333')
         
-        # Right side: Integrated answer + C (moved closer to equals sign)
-        result_x = equals_x + 30  # Reduced spacing
+        # Compute available result area and center x
+        result_left_x = (start_x + integral_total_width + component_spacing +
+                         function_text_width + component_spacing + dx_box_width +
+                         component_spacing + equals_width + component_spacing)
+        available_result_width = (total_width - right_margin) - result_left_x
+        result_x = int(result_left_x + available_result_width / 2)
+        
+        # Convert fractions to stacked format for better mathematical display
+        stacked_result, c_part_stacked = self.convert_fractions_to_stacked(display_integral + c_part)
         
         # Check if result contains fractions (has newlines)
-        if '\n' in display_integral:
-            # For fractions, create a multi-line display
-            lines = display_integral.split('\n')
+        if '\n' in stacked_result:
+            # For fractions, create a multi-line display with proper positioning
+            lines = stacked_result.split('\n')
             
-            # Display each line of the fraction with proper exponent positioning
+            # Calculate tighter vertical positioning for fractions
+            # Reduce spacing between numerator, fraction bar, and denominator
+            line_spacing = 15  # Reduced from 20 for tighter spacing
+            fraction_height = len(lines) * line_spacing
+            start_y = 100 - (fraction_height // 2) + 5  # Reduced offset for better centering
+            
+            # Display each line of the fraction with tighter spacing
             for i, line in enumerate(lines):
-                y_offset = 75 + (i - 1) * 20  # Center the middle line
-                self.parse_and_display_exponent(display_canvas, result_x, y_offset, line, 16)
-            
-            # Display +C separately, positioned to the right of the fraction
-            if c_part:
-                # Calculate position for +C (to the right of the fraction)
-                fraction_width = max(len(line) for line in lines) * 8 + 20  # Approximate width
-                c_x = result_x + fraction_width
-                c_y = 75  # Center vertically with the fraction
-                display_canvas.create_text(c_x, c_y, text=c_part, 
-                                       font=('Arial', 16, 'bold'), fill='#333333')
-            else:
-                # If no +C was detected, add it manually for indefinite integrals
-                fraction_width = max(len(line) for line in lines) * 8 + 20
-                c_x = result_x + fraction_width
-                c_y = 75
-                display_canvas.create_text(c_x, c_y, text=" + C", 
-                                       font=('Arial', 16, 'bold'), fill='#333333')
+                y_offset = start_y + (i * line_spacing)
+                display_canvas.create_text(result_x, y_offset, text=line, 
+                                         font=('Arial', 16, 'bold'), fill='#333333')
         else:
-            # Single line result with proper exponent positioning
-            if c_part:
-                result_text = display_integral + c_part
-            else:
-                result_text = display_integral + " + C"
-            self.parse_and_display_exponent(display_canvas, result_x, 75, result_text, 16)
+            # Non-fraction: wrap to available width using font metrics
+            font_obj = tkfont.Font(family='Arial', size=16, weight='bold')
+            wrapped_lines = self.wrap_text_for_canvas(stacked_result, int(available_result_width), font_obj)
+            line_spacing = int(font_obj.metrics('linespace') * 1.2) or 20
+            start_y = int(100 - (len(wrapped_lines) - 1) * line_spacing / 2)
+            for i, line in enumerate(wrapped_lines):
+                y = start_y + i * line_spacing
+                display_canvas.create_text(result_x, y, text=line,
+                                           font=('Arial', 16, 'bold'), fill='#333333')
         
         # TeX label
         tex_label = tk.Label(main_frame, text="TeX", 
                            font=('Arial', 8), bg='#F5F5DC', fg='#999999')
-        tex_label.place(x=total_width-60, y=200)
+        tex_label.place(x=total_width-60, y=230)
         
         # Close button
         close_btn = tk.Button(main_frame, text="Close", font=('Arial', 10, 'bold'),
                             bg='#4169E1', fg='white', relief='raised', bd=1,
                             command=result_window.destroy)
-        close_btn.pack(pady=(10, 0))
+        close_btn.pack(pady=(15, 0))
     
-    def show_definite_result_popup(self, func_str, integral, definite_result, a, b):
-        """Show definite integral result in a popup window"""
+    def show_definite_result_popup(self, func_str, integral, definite_result_exact, a_display, b_display, numeric_result):
+        """Show definite integral result in a popup window with improved layout"""
         # Convert function to proper mathematical notation
         display_func = self.convert_to_math_notation(func_str)
-        # Convert integral result to proper mathematical notation first, then handle fractions
+        # Convert integral result to proper mathematical notation - keep horizontal format
         integral_with_superscripts = self.convert_to_math_notation(str(integral))
-        display_integral, c_part = self.convert_fractions_to_stacked(integral_with_superscripts)
+        display_integral = integral_with_superscripts
         
-        # Calculate required width for complete equation with increased spacing
-        integral_space = 60
-        func_space = len(display_func) * 8 + 30
-        dx_space = 30
-        equals_space = 50  # Increased spacing from dx
-        result_space = len(str(definite_result)) * 12 + 100  # Increased space for result
-        safety_margin = 50  # Increased safety margin
+        # Calculate required width dynamically based on actual equation components
+        # More accurate spacing calculation for even distribution
         
-        total_space = integral_space + func_space + dx_space + equals_space + result_space + safety_margin
-        min_width = 600  # Increased minimum width
-        total_width = max(min_width, total_space)
+        # Calculate actual text widths using font metrics
+        font_size = 16
+        char_width = font_size * 0.6  # Approximate character width for Arial font
+        
+        # Component spacing calculations
+        integral_symbol_width = 80  # Width of the integral symbol
+        integral_bounds_width = 20  # Space for bounds
+        integral_total_width = integral_symbol_width + integral_bounds_width
+        
+        function_text_width = len(display_func) * char_width + 20  # Function text + reduced padding
+        dx_box_width = 30  # dx box width (reduced)
+        equals_width = 15  # equals sign width (reduced)
+        
+        # Calculate result width based on exact symbolic result
+        result_str = str(definite_result_exact)
+        if '/' in result_str:
+            # For fractions, estimate width based on longest part
+            parts = result_str.split('/')
+            max_part_width = max(len(part) for part in parts) * char_width
+            result_text_width = max_part_width + 40  # Extra space for fraction formatting
+        else:
+            result_text_width = len(result_str) * char_width + 20  # Standard width
+        
+        # Spacing between components (tighter for better content hugging)
+        component_spacing = 20  # Reduced from 30 for tighter spacing
+        
+        # Calculate total required width with safety factor for longer equations
+        total_equation_width = (integral_total_width + component_spacing + 
+                               function_text_width + component_spacing + 
+                               dx_box_width + component_spacing + 
+                               equals_width + component_spacing + 
+                               result_text_width)
+        
+        # Add safety factor for very long equations to prevent stacking
+        safety_factor = 1.2  # 20% extra space for complex expressions
+        total_equation_width = int(total_equation_width * safety_factor)
+        
+        # Add tighter margins for better content hugging
+        left_margin = 30  # Reduced from 50
+        right_margin = 30  # Reduced from 50
+        total_width = int(total_equation_width + left_margin + right_margin)
+        
+        # Set tighter bounds for better content hugging
+        min_width = 400  # Reduced from 600 for shorter equations
+        max_width = 2500  # Increased to accommodate longer equations with stacked fractions
+        total_width = max(min_width, min(max_width, total_width))
         
         # Create popup window
         result_window = tk.Toplevel(self.root)
         result_window.title("Definite Integral Result")
-        result_window.geometry(f"{total_width}x350")
+        result_window.geometry(f"{total_width}x400")  # Increased height for better layout
         result_window.configure(bg='#F5F5DC')
         result_window.resizable(False, False)
         
@@ -790,96 +1017,129 @@ class IntegralCalculator:
         
         # Main frame
         main_frame = tk.Frame(result_window, bg='#F5F5DC')
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Title
         title_label = tk.Label(main_frame, text="Definite Integral Result", 
                               font=('Arial', 14, 'bold'), bg='#F5F5DC', fg='#333333')
-        title_label.pack(pady=(0, 10))
+        title_label.pack(pady=(0, 15))
         
         # Display canvas with same styling as main integral display
-        display_canvas = tk.Canvas(main_frame, width=total_width-20, height=200, 
+        display_canvas = tk.Canvas(main_frame, width=total_width-30, height=220, 
                                   bg='white', relief='solid', bd=1,
                                   highlightthickness=2, highlightbackground='#87CEEB')
-        display_canvas.pack(pady=5)
+        display_canvas.pack(pady=10)
         
         # Create grid pattern
-        for i in range(0, total_width-20, 20):
-            display_canvas.create_line(i, 0, i, 200, fill='#F0F0F0', width=1)
-        for i in range(0, 200, 20):
-            display_canvas.create_line(0, i, total_width-20, i, fill='#F0F0F0', width=1)
+        for i in range(0, total_width-30, 20):
+            display_canvas.create_line(i, 0, i, 220, fill='#F0F0F0', width=1)
+        for i in range(0, 220, 20):
+            display_canvas.create_line(0, i, total_width-30, i, fill='#F0F0F0', width=1)
         
-        # Create definite integral display
-        # Integral symbol with bounds
+        # Create definite integral display with dynamic positioning for even spacing
+        # Calculate positions based on actual component widths
+        
+        # Start position (left margin)
+        start_x = left_margin
+        
+        # Integral symbol position
+        integral_x = start_x + integral_symbol_width // 2
         integral_label = tk.Label(display_canvas, text="∫", 
                                  font=('Times New Roman', 80, 'bold'), 
                                  bg='white', fg='#333333')
-        display_canvas.create_window(100, 100, window=integral_label)
+        display_canvas.create_window(integral_x, 110, window=integral_label)
         
-        # Bounds
+        # Bounds positioned relative to integral symbol
         # Upper bound
-        display_canvas.create_rectangle(90, 25, 100, 35, fill='white', 
+        display_canvas.create_rectangle(integral_x - 10, 35, integral_x, 45, fill='white', 
                                        outline='#333333')
-        display_canvas.create_text(95, 30, text=str(b), 
+        display_canvas.create_text(integral_x - 5, 40, text=str(b_display), 
                                  font=('Arial', 10, 'bold'), fill='#333333')
         
         # Lower bound
-        display_canvas.create_rectangle(90, 165, 100, 175, fill='white', 
+        display_canvas.create_rectangle(integral_x - 10, 175, integral_x, 185, fill='white', 
                                        outline='#333333')
-        display_canvas.create_text(95, 170, text=str(a), 
+        display_canvas.create_text(integral_x - 5, 180, text=str(a_display), 
                                  font=('Arial', 10, 'bold'), fill='#333333')
         
-        # Function expression
-        func_x = 140
-        display_canvas.create_text(func_x, 100, text=f"({display_func})", 
+        # Function expression position
+        func_x = start_x + integral_total_width + component_spacing + function_text_width // 2
+        display_canvas.create_text(func_x, 110, text=f"({display_func})", 
                                  font=('Arial', 16, 'bold'), fill='#333333')
         
-        # dx box
+        # dx box position
+        dx_x = start_x + integral_total_width + component_spacing + function_text_width + component_spacing + dx_box_width // 2
         dx_frame = tk.Frame(display_canvas, bg='#F0F0F0', relief='solid', bd=1)
         dx_label = tk.Label(dx_frame, text="dx", font=('Arial', 12, 'bold'), 
                            bg='#F0F0F0', fg='#333333')
         dx_label.pack(padx=5, pady=2)
-        func_width = len(f"({display_func})") * 8 + 15
-        dx_x = func_x + func_width
-        display_canvas.create_window(dx_x, 100, window=dx_frame)
+        display_canvas.create_window(dx_x, 110, window=dx_frame)
         
-        # Equals sign
-        equals_x = dx_x + 50  # Increased spacing from dx
-        display_canvas.create_text(equals_x, 100, text="=", 
+        # Equals sign position
+        equals_x = start_x + integral_total_width + component_spacing + function_text_width + component_spacing + dx_box_width + component_spacing + equals_width // 2
+        display_canvas.create_text(equals_x, 110, text="=", 
                                  font=('Arial', 20, 'bold'), fill='#333333')
         
-        # Result - format to 4 decimal places and position with more spacing
-        try:
-            # Convert to float and format to 4 decimal places
-            if hasattr(definite_result, 'evalf'):
-                numeric_result = float(definite_result.evalf())
-            else:
-                numeric_result = float(definite_result)
-            formatted_result = f"{numeric_result:.4f}"
-        except:
-            # Fallback to string representation if conversion fails
-            formatted_result = str(definite_result)
+        # Exact result string used for display; numeric shown in info below
+        formatted_result = str(definite_result_exact)
         
-        result_x = equals_x + 50  # Increased spacing from equals sign
-        display_canvas.create_text(result_x, 100, text=formatted_result, 
-                                 font=('Arial', 16, 'bold'), fill='#333333')
+        # Compute available result area and center x
+        result_left_x = (start_x + integral_total_width + component_spacing +
+                         function_text_width + component_spacing + dx_box_width +
+                         component_spacing + equals_width + component_spacing)
+        available_result_width = (total_width - right_margin) - result_left_x
+        result_x = int(result_left_x + available_result_width / 2)
+        
+        # For definite integrals, convert any fractions to stacked format
+        stacked_result, _ = self.convert_fractions_to_stacked(formatted_result)
+        
+        # Check if result contains fractions (has newlines)
+        if '\n' in stacked_result:
+            # For fractions, create a multi-line display with proper positioning
+            lines = stacked_result.split('\n')
+            
+            # Calculate tighter vertical positioning for fractions
+            # Reduce spacing between numerator, fraction bar, and denominator
+            line_spacing = 15  # Reduced from 20 for tighter spacing
+            fraction_height = len(lines) * line_spacing
+            start_y = 110 - (fraction_height // 2) + 5  # Reduced offset for better centering
+            
+            # Display each line of the fraction with tighter spacing
+            for i, line in enumerate(lines):
+                y_offset = start_y + (i * line_spacing)
+                display_canvas.create_text(result_x, y_offset, text=line, 
+                                         font=('Arial', 16, 'bold'), fill='#333333')
+        else:
+            # Non-fraction: wrap to available width using font metrics
+            font_obj = tkfont.Font(family='Arial', size=16, weight='bold')
+            wrapped_lines = self.wrap_text_for_canvas(stacked_result, int(available_result_width), font_obj)
+            line_spacing = int(font_obj.metrics('linespace') * 1.2) or 20
+            start_y = int(110 - (len(wrapped_lines) - 1) * line_spacing / 2)
+            for i, line in enumerate(wrapped_lines):
+                y = start_y + i * line_spacing
+                display_canvas.create_text(result_x, y, text=line,
+                                           font=('Arial', 16, 'bold'), fill='#333333')
         
         # TeX label
         tex_label = tk.Label(main_frame, text="TeX", 
                            font=('Arial', 8), bg='#F5F5DC', fg='#999999')
-        tex_label.place(x=total_width-60, y=220)
+        tex_label.place(x=total_width-60, y=250)
         
         # Additional info
-        info_text = f"∫ from {a} to {b} of {func_str} dx = {formatted_result}"
+        if numeric_result is not None:
+            approx_text = f" ≈ {numeric_result:.4f}"
+        else:
+            approx_text = ""
+        info_text = f"∫ from {a_display} to {b_display} of {func_str} dx = {formatted_result}{approx_text}"
         info_label = tk.Label(main_frame, text=info_text, 
                              font=('Arial', 11), bg='#F5F5DC', fg='#666666')
-        info_label.pack(pady=(10, 0))
+        info_label.pack(pady=(15, 0))
         
         # Close button
         close_btn = tk.Button(main_frame, text="Close", font=('Arial', 10, 'bold'),
                             bg='#4169E1', fg='white', relief='raised', bd=1,
                             command=result_window.destroy)
-        close_btn.pack(pady=(10, 0))
+        close_btn.pack(pady=(15, 0))
 
 def main():
     root = tk.Tk()
